@@ -642,11 +642,18 @@ function extractToolCommand(payload: Record<string, unknown> | null): string | n
   const item = asRecord(data?.item);
   const itemResult = asRecord(item?.result);
   const itemInput = asRecord(item?.input);
+  const itemType = extractWorkLogItemType(payload);
+  const requestKind = extractWorkLogRequestKind(payload);
+  const detailCommand =
+    itemType === "command_execution" || requestKind === "command"
+      ? normalizeToolCommandValue(asTrimmedString(payload?.detail))
+      : null;
   const candidates = [
     normalizeToolCommandValue(item?.command),
     normalizeToolCommandValue(itemInput?.command),
     normalizeToolCommandValue(itemResult?.command),
     normalizeToolCommandValue(data?.command),
+    detailCommand,
   ];
   return candidates.find((candidate) => candidate !== null) ?? null;
 }
