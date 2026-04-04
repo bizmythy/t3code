@@ -125,7 +125,6 @@ export interface CodexAppServerStartSessionInput {
   readonly resumeCursor?: unknown;
   readonly binaryPath: string;
   readonly homePath?: string;
-  readonly environmentWarning?: string;
   readonly runtimeMode: RuntimeMode;
 }
 
@@ -500,9 +499,6 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       this.attachProcessListeners(context);
 
       this.emitLifecycleEvent(context, "session/connecting", "Starting codex app-server");
-      if (input.environmentWarning) {
-        this.emitNotificationEvent(context, "session/environmentWarning", input.environmentWarning);
-      }
 
       await this.sendRequest(context, "initialize", buildCodexInitializeParams());
 

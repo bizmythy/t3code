@@ -1107,6 +1107,29 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       },
     );
 
+    const buildProjectAwareStartInput = Effect.fn("terminal.buildProjectAwareStartInput")(
+      function* (input: {
+        readonly threadId: string;
+        readonly terminalId: string;
+        readonly cwd: string;
+        readonly env?: Record<string, string>;
+      }) {
+        const resolvedEnvironment = yield* resolveProjectEnvironment({
+          threadId: input.threadId,
+          terminalId: input.terminalId,
+          cwd: input.cwd,
+        });
+
+        return {
+          env: {
+            ...toRuntimeEnvRecord(resolvedEnvironment?.env ?? process.env),
+            ...input.env,
+          },
+          ...(resolvedEnvironment?.warning ? { direnvWarning: resolvedEnvironment.warning } : {}),
+        } satisfies Pick<TerminalStartInput, "env" | "direnvWarning">;
+      },
+    );
+
     const getSession = Effect.fn("terminal.getSession")(function* (
       threadId: string,
       terminalId: string,
@@ -1650,10 +1673,11 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           if (Option.isNone(existing)) {
             yield* flushPersist(input.threadId, terminalId);
             const history = yield* readHistory(input.threadId, terminalId);
-            const resolvedEnvironment = yield* resolveProjectEnvironment({
+            const projectAwareStartInput = yield* buildProjectAwareStartInput({
               threadId: input.threadId,
               terminalId,
               cwd: input.cwd,
+              ...(input.env ? { env: input.env } : {}),
             });
             const cols = input.cols ?? DEFAULT_OPEN_COLS;
             const rows = input.rows ?? DEFAULT_OPEN_ROWS;
@@ -1698,13 +1722,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
                 ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
                 cols,
                 rows,
-                env: {
-                  ...toRuntimeEnvRecord(resolvedEnvironment?.env ?? process.env),
-                  ...input.env,
-                },
-                ...(resolvedEnvironment?.warning
-                  ? { direnvWarning: resolvedEnvironment.warning }
-                  : {}),
+                ...projectAwareStartInput,
               },
               "started",
             );
@@ -1749,10 +1767,11 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           }
 
           if (!liveSession.process) {
-            const resolvedEnvironment = yield* resolveProjectEnvironment({
+            const projectAwareStartInput = yield* buildProjectAwareStartInput({
               threadId: input.threadId,
               terminalId,
               cwd: input.cwd,
+              ...(input.env ? { env: input.env } : {}),
             });
             yield* startSession(
               liveSession,
@@ -1763,13 +1782,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
                 worktreePath: liveSession.worktreePath,
                 cols: targetCols,
                 rows: targetRows,
-                env: {
-                  ...toRuntimeEnvRecord(resolvedEnvironment?.env ?? process.env),
-                  ...input.env,
-                },
-                ...(resolvedEnvironment?.warning
-                  ? { direnvWarning: resolvedEnvironment.warning }
-                  : {}),
+                ...projectAwareStartInput,
               },
               "started",
             );
@@ -1893,10 +1906,11 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
           const cols = input.cols ?? session.cols;
           const rows = input.rows ?? session.rows;
-          const resolvedEnvironment = yield* resolveProjectEnvironment({
+          const projectAwareStartInput = yield* buildProjectAwareStartInput({
             threadId: input.threadId,
             terminalId,
             cwd: input.cwd,
+            ...(input.env ? { env: input.env } : {}),
           });
 
           session.history = "";
@@ -1914,13 +1928,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
               cols,
               rows,
-              env: {
-                ...toRuntimeEnvRecord(resolvedEnvironment?.env ?? process.env),
-                ...input.env,
-              },
-              ...(resolvedEnvironment?.warning
-                ? { direnvWarning: resolvedEnvironment.warning }
-                : {}),
+              ...projectAwareStartInput,
             },
             "restarted",
           );

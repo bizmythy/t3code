@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 /**
  * CodexAdapterLive - Scoped live implementation for the Codex provider adapter.
  *
@@ -13,6 +14,7 @@ import {
   type ProviderRuntimeEvent,
   type ThreadTokenUsageSnapshot,
   type ProviderUserInputAnswers,
+  EventId,
   RuntimeItemId,
   RuntimeRequestId,
   RuntimeTaskId,
@@ -673,19 +675,6 @@ function mapToRuntimeEvents(
         payload: {
           state: "ready",
           ...(event.message ? { reason: event.message } : {}),
-        },
-      },
-    ];
-  }
-
-  if (event.method === "session/environmentWarning") {
-    return [
-      {
-        ...runtimeEventBase(event, canonicalThreadId),
-        type: "runtime.warning",
-        payload: {
-          message: event.message ?? "Project environment warning",
-          ...(event.payload !== undefined ? { detail: event.payload } : {}),
         },
       },
     ];
@@ -1440,9 +1429,6 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         runtimeMode: input.runtimeMode,
         binaryPath,
         ...(homePath ? { homePath } : {}),
-        ...(resolvedEnvironment?.warning
-          ? { environmentWarning: resolvedEnvironment.warning }
-          : {}),
         ...(input.modelSelection?.provider === "codex"
           ? { model: input.modelSelection.model }
           : {}),
@@ -1451,7 +1437,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           : {}),
       };
 
-      return yield* Effect.tryPromise({
+      const session = yield* Effect.tryPromise({
         try: () => manager.startSession(managerInput),
         catch: (cause) =>
           new ProviderAdapterProcessError({
@@ -1461,6 +1447,15 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             cause,
           }),
       });
+      if (resolvedEnvironment?.warning) {
+        yield* emitProjectEnvironmentWarning(input.threadId, resolvedEnvironment.warning, {
+          cwd: input.cwd,
+          rcPath: resolvedEnvironment.rcPath,
+          autoAllowedWorktree: resolvedEnvironment.autoAllowedWorktree === true,
+          usedFallback: true,
+        });
+      }
+      return session;
     },
   );
 
@@ -1606,6 +1601,27 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     });
 
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+  const offerRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
+    Queue.offer(runtimeEventQueue, event).pipe(Effect.asVoid);
+
+  const emitProjectEnvironmentWarning = Effect.fn("emitProjectEnvironmentWarning")(function* (
+    threadId: ThreadId,
+    message: string,
+    detail?: unknown,
+  ) {
+    yield* offerRuntimeEvent({
+      type: "runtime.warning",
+      eventId: EventId.makeUnsafe(randomUUID()),
+      provider: PROVIDER,
+      createdAt: new Date().toISOString(),
+      threadId,
+      payload: {
+        message,
+        ...(detail !== undefined ? { detail } : {}),
+      },
+      providerRefs: {},
+    });
+  });
 
   const writeNativeEvent = Effect.fn("writeNativeEvent")(function* (event: ProviderEvent) {
     if (!nativeEventLogger) {

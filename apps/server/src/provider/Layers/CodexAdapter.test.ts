@@ -220,7 +220,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
       assert.equal(managerInput?.runtimeMode, "full-access");
     }),
   );
-  it.effect("passes a direnv-resolved environment and warning through to the Codex manager", () => {
+  it.effect("passes a direnv-resolved environment through to the Codex manager", () => {
     const manager = new FakeCodexManager();
     const adapterLayer = makeCodexAdapterLive({ manager }).pipe(
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
@@ -262,10 +262,6 @@ validationLayer("CodexAdapterLive validation", (it) => {
         IN_NIX_SHELL: "impure",
       });
       assert.equal(managerInput?.binaryPath, "codex");
-      assert.equal(
-        managerInput?.environmentWarning,
-        "direnv activation failed for /tmp/project/.envrc; using ambient environment",
-      );
       assert.equal(managerInput?.runtimeMode, "full-access");
     }).pipe(Effect.provide(adapterLayer));
   });
