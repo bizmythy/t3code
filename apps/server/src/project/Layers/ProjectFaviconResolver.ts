@@ -33,6 +33,7 @@ const FAVICON_CANDIDATES = [
 const ICON_SOURCE_FILES = [
   "index.html",
   "public/index.html",
+  "web/index.html",
   "app/routes/__root.tsx",
   "src/routes/__root.tsx",
   "app/root.tsx",
@@ -58,9 +59,15 @@ export const makeProjectFaviconResolver = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
-  const resolveIconHref = (projectCwd: string, href: string): string[] => {
+  const resolveIconHref = (projectCwd: string, sourceFile: string, href: string): string[] => {
     const clean = href.replace(/^\//, "");
-    return [path.join(projectCwd, "public", clean), path.join(projectCwd, clean)];
+    const sourceDir = path.dirname(path.join(projectCwd, sourceFile));
+    return [
+      path.join(projectCwd, "public", clean),
+      path.join(projectCwd, clean),
+      path.join(sourceDir, "public", clean),
+      path.join(sourceDir, clean),
+    ];
   };
 
   const isPathWithinProject = (projectCwd: string, candidatePath: string): boolean => {
@@ -109,7 +116,7 @@ export const makeProjectFaviconResolver = Effect.gen(function* () {
       if (!href) {
         continue;
       }
-      const existing = yield* findExistingFile(cwd, resolveIconHref(cwd, href));
+      const existing = yield* findExistingFile(cwd, resolveIconHref(cwd, sourceFile, href));
       if (existing) {
         return existing;
       }
