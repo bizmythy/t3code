@@ -22,6 +22,7 @@ import {
   type CodexAppServerSendTurnInput,
 } from "../../codexAppServerManager.ts";
 import { ServerConfig } from "../../config.ts";
+import { ProjectRuntimeEnvironment } from "../../project/Services/ProjectRuntimeEnvironment.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import { CodexAdapter } from "../Services/CodexAdapter.ts";
@@ -148,10 +149,19 @@ const providerSessionDirectoryTestLayer = Layer.succeed(ProviderSessionDirectory
   listThreadIds: () => Effect.succeed([]),
 });
 
+const ambientProjectRuntimeEnvironmentLayer = Layer.succeed(ProjectRuntimeEnvironment, {
+  resolveForCwd: () =>
+    Effect.succeed({
+      env: process.env,
+      mode: "ambient" as const,
+    }),
+});
+
 const validationManager = new FakeCodexManager();
 const validationLayer = it.layer(
   makeCodexAdapterLive({ manager: validationManager }).pipe(
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+    Layer.provideMerge(ambientProjectRuntimeEnvironmentLayer),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
@@ -200,16 +210,65 @@ validationLayer("CodexAdapterLive validation", (it) => {
         runtimeMode: "full-access",
       });
 
-      assert.deepStrictEqual(validationManager.startSessionImpl.mock.calls[0]?.[0], {
-        provider: "codex",
-        threadId: asThreadId("thread-1"),
-        binaryPath: "codex",
-        model: "gpt-5.3-codex",
-        serviceTier: "fast",
-        runtimeMode: "full-access",
-      });
+      const managerInput = validationManager.startSessionImpl.mock.calls[0]?.[0];
+      assert.equal(managerInput?.provider, "codex");
+      assert.equal(managerInput?.threadId, asThreadId("thread-1"));
+      assert.equal(managerInput?.binaryPath, "codex");
+      assert.equal(managerInput?.env, undefined);
+      assert.equal(managerInput?.model, "gpt-5.3-codex");
+      assert.equal(managerInput?.serviceTier, "fast");
+      assert.equal(managerInput?.runtimeMode, "full-access");
     }),
   );
+  it.effect("passes a direnv-resolved environment and warning through to the Codex manager", () => {
+    const manager = new FakeCodexManager();
+    const adapterLayer = makeCodexAdapterLive({ manager }).pipe(
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(
+        Layer.succeed(ProjectRuntimeEnvironment, {
+          resolveForCwd: (cwd: string) =>
+            Effect.succeed({
+              env: {
+                PATH: "/direnv/bin",
+                IN_NIX_SHELL: "impure",
+              },
+              mode: "ambient" as const,
+              rcPath: `${cwd}/.envrc`,
+              warning:
+                "direnv activation failed for /tmp/project/.envrc; using ambient environment",
+            }),
+        }),
+      ),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(providerSessionDirectoryTestLayer),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    return Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+
+      yield* adapter.startSession({
+        provider: "codex",
+        threadId: asThreadId("thread-2"),
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+
+      const managerInput = manager.startSessionImpl.mock.calls[0]?.[0];
+      assert.equal(managerInput?.provider, "codex");
+      assert.equal(managerInput?.threadId, asThreadId("thread-2"));
+      assert.equal(managerInput?.cwd, "/tmp/project");
+      assert.deepStrictEqual(managerInput?.env, {
+        PATH: "/direnv/bin",
+        IN_NIX_SHELL: "impure",
+      });
+      assert.equal(managerInput?.binaryPath, "codex");
+      assert.equal(
+        managerInput?.environmentWarning,
+        "direnv activation failed for /tmp/project/.envrc; using ambient environment",
+      );
+      assert.equal(managerInput?.runtimeMode, "full-access");
+    }).pipe(Effect.provide(adapterLayer));
+  });
 });
 
 const sessionErrorManager = new FakeCodexManager();
@@ -219,6 +278,7 @@ sessionErrorManager.sendTurnImpl.mockImplementation(async () => {
 const sessionErrorLayer = it.layer(
   makeCodexAdapterLive({ manager: sessionErrorManager }).pipe(
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+    Layer.provideMerge(ambientProjectRuntimeEnvironmentLayer),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
@@ -288,6 +348,7 @@ const lifecycleManager = new FakeCodexManager();
 const lifecycleLayer = it.layer(
   makeCodexAdapterLive({ manager: lifecycleManager }).pipe(
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+    Layer.provideMerge(ambientProjectRuntimeEnvironmentLayer),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),

@@ -41,6 +41,7 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { ProjectRuntimeEnvironment } from "../../project/Services/ProjectRuntimeEnvironment.ts";
 
 const PROVIDER = "codex" as const;
 
@@ -672,6 +673,19 @@ function mapToRuntimeEvents(
         payload: {
           state: "ready",
           ...(event.message ? { reason: event.message } : {}),
+        },
+      },
+    ];
+  }
+
+  if (event.method === "session/environmentWarning") {
+    return [
+      {
+        ...runtimeEventBase(event, canonicalThreadId),
+        type: "runtime.warning",
+        payload: {
+          message: event.message ?? "Project environment warning",
+          ...(event.payload !== undefined ? { detail: event.payload } : {}),
         },
       },
     ];
@@ -1378,6 +1392,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     }),
   );
   const serverSettingsService = yield* ServerSettingsService;
+  const projectRuntimeEnvironment = yield* ProjectRuntimeEnvironment;
 
   const startSession: CodexAdapterShape["startSession"] = Effect.fn("startSession")(
     function* (input) {
@@ -1403,14 +1418,31 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       );
       const binaryPath = codexSettings.binaryPath;
       const homePath = codexSettings.homePath;
+      const resolvedEnvironment = input.cwd
+        ? yield* projectRuntimeEnvironment.resolveForCwd(input.cwd)
+        : undefined;
+      if (resolvedEnvironment?.warning) {
+        yield* Effect.logWarning("codex session falling back to ambient project environment", {
+          threadId: input.threadId,
+          cwd: input.cwd,
+          rcPath: resolvedEnvironment.rcPath ?? null,
+          warning: resolvedEnvironment.warning,
+          autoAllowedWorktree: resolvedEnvironment.autoAllowedWorktree === true,
+          usedFallback: true,
+        });
+      }
       const managerInput: CodexAppServerStartSessionInput = {
         threadId: input.threadId,
         provider: "codex",
         ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
+        ...(resolvedEnvironment ? { env: resolvedEnvironment.env } : {}),
         ...(input.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
         runtimeMode: input.runtimeMode,
         binaryPath,
         ...(homePath ? { homePath } : {}),
+        ...(resolvedEnvironment?.warning
+          ? { environmentWarning: resolvedEnvironment.warning }
+          : {}),
         ...(input.modelSelection?.provider === "codex"
           ? { model: input.modelSelection.model }
           : {}),

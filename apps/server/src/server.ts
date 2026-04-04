@@ -38,6 +38,7 @@ import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor"
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry";
 import { ServerSettingsLive } from "./serverSettings";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver";
+import { ProjectRuntimeEnvironmentLive } from "./project/Layers/ProjectRuntimeEnvironment";
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths";
@@ -147,6 +148,7 @@ const ProviderLayerLive = Layer.unwrap(
       Layer.provide(codexAdapterLayer),
       Layer.provide(claudeAdapterLayer),
       Layer.provideMerge(providerSessionDirectoryLayer),
+      Layer.provideMerge(ProjectRuntimeEnvironmentLive),
     );
     return makeProviderServiceLive(
       canonicalEventLogger ? { canonicalEventLogger } : undefined,
@@ -168,7 +170,10 @@ const GitLayerLive = Layer.empty.pipe(
   Layer.provideMerge(GitCoreLive),
 );
 
-const TerminalLayerLive = TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive));
+const TerminalLayerLive = TerminalManagerLive.pipe(
+  Layer.provide(PtyAdapterLive),
+  Layer.provideMerge(ProjectRuntimeEnvironmentLive),
+);
 
 const WorkspaceLayerLive = Layer.mergeAll(
   WorkspacePathsLive,
