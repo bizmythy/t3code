@@ -33,6 +33,7 @@ import {
   PtySpawnError,
 } from "../Services/PTY";
 import { makeTerminalManagerWithOptions } from "./Manager";
+import type { ProjectRuntimeEnvironmentShape } from "../../project/Services/ProjectRuntimeEnvironment.ts";
 
 class FakePtyProcess implements PtyProcess {
   readonly writes: string[] = [];
@@ -193,6 +194,7 @@ interface CreateManagerOptions {
   processKillGraceMs?: number;
   maxRetainedInactiveSessions?: number;
   ptyAdapter?: FakePtyAdapter;
+  projectRuntimeEnvironment?: ProjectRuntimeEnvironmentShape;
 }
 
 interface ManagerFixture {
@@ -222,6 +224,9 @@ const createManager = (
         historyLineLimit,
         ptyAdapter,
         ...(options.shellResolver !== undefined ? { shellResolver: options.shellResolver } : {}),
+        ...(options.projectRuntimeEnvironment !== undefined
+          ? { projectRuntimeEnvironment: options.projectRuntimeEnvironment }
+          : {}),
         ...(options.subprocessChecker !== undefined
           ? { subprocessChecker: options.subprocessChecker }
           : {}),
@@ -899,8 +904,8 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
       yield* manager.open(
         openInput({
           env: {
-            T3CODE_PROJECT_ROOT: "/repo",
-            T3CODE_WORKTREE_PATH: "/repo/worktree-a",
+            CUSTOM_ROOT: "/repo",
+            CUSTOM_WORKTREE_PATH: "/repo/worktree-a",
             CUSTOM_FLAG: "1",
           },
         }),
@@ -909,10 +914,76 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
       expect(spawnInput).toBeDefined();
       if (!spawnInput) return;
 
-      assert.equal(spawnInput.env.T3CODE_PROJECT_ROOT, "/repo");
-      assert.equal(spawnInput.env.T3CODE_WORKTREE_PATH, "/repo/worktree-a");
+      assert.equal(spawnInput.env.CUSTOM_ROOT, "/repo");
+      assert.equal(spawnInput.env.CUSTOM_WORKTREE_PATH, "/repo/worktree-a");
       assert.equal(spawnInput.env.CUSTOM_FLAG, "1");
     }),
+  );
+
+  it.effect(
+    "merges direnv-resolved environment into spawned terminals before explicit overrides",
+    () =>
+      Effect.gen(function* () {
+        const { manager, ptyAdapter } = yield* createManager(5, {
+          projectRuntimeEnvironment: {
+            resolveForCwd: () =>
+              Effect.succeed({
+                env: {
+                  PATH: "/direnv/bin",
+                  IN_NIX_SHELL: "impure",
+                  DIRENV_ROOT: "/direnv-project",
+                },
+                mode: "direnv",
+                rcPath: "/repo/.envrc",
+              }),
+          },
+        });
+
+        yield* manager.open(
+          openInput({
+            env: {
+              CUSTOM_ROOT: "/repo",
+              CUSTOM_FLAG: "1",
+            },
+          }),
+        );
+        const spawnInput = ptyAdapter.spawnInputs[0];
+        expect(spawnInput).toBeDefined();
+        if (!spawnInput) return;
+
+        assert.equal(spawnInput.env.PATH, "/direnv/bin");
+        assert.equal(spawnInput.env.IN_NIX_SHELL, "impure");
+        assert.equal(spawnInput.env.DIRENV_ROOT, "/direnv-project");
+        assert.equal(spawnInput.env.CUSTOM_ROOT, "/repo");
+        assert.equal(spawnInput.env.CUSTOM_FLAG, "1");
+      }),
+  );
+
+  it.effect(
+    "emits a synthetic output warning when direnv falls back to the ambient environment",
+    () =>
+      Effect.gen(function* () {
+        const { manager, getEvents } = yield* createManager(5, {
+          projectRuntimeEnvironment: {
+            resolveForCwd: () =>
+              Effect.succeed({
+                env: { PATH: "/ambient/bin" },
+                mode: "ambient",
+                rcPath: "/repo/.envrc",
+                warning: "direnv activation failed for /repo/.envrc; using ambient environment",
+              }),
+          },
+        });
+
+        yield* manager.open(openInput());
+        const events = yield* getEvents;
+        const outputEvent = events.find((event) => event.type === "output");
+
+        expect(outputEvent).toBeDefined();
+        expect(outputEvent?.type === "output" ? outputEvent.data : "").toContain(
+          "[t3code] direnv activation failed for /repo/.envrc; using ambient environment",
+        );
+      }),
   );
 
   it.effect("starts zsh with prompt spacer disabled to avoid `%` end markers", () =>

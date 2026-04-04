@@ -21,6 +21,7 @@ import { Effect, Fiber, Layer, Random, Stream } from "effect";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { ProjectRuntimeEnvironment } from "../../project/Services/ProjectRuntimeEnvironment.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import { ClaudeAdapter } from "../Services/ClaudeAdapter.ts";
@@ -135,6 +136,18 @@ function makeHarness(config?: {
   readonly nativeEventLogger?: ClaudeAdapterLiveOptions["nativeEventLogger"];
   readonly cwd?: string;
   readonly baseDir?: string;
+  readonly projectRuntimeEnvironment?: {
+    readonly resolveForCwd: (cwd: string) => Effect.Effect<
+      {
+        readonly env: NodeJS.ProcessEnv;
+        readonly mode: "ambient" | "direnv";
+        readonly rcPath?: string;
+        readonly warning?: string;
+        readonly autoAllowedWorktree?: boolean;
+      },
+      never
+    >;
+  };
 }) {
   const query = new FakeClaudeQuery();
   let createInput:
@@ -168,6 +181,17 @@ function makeHarness(config?: {
           config?.cwd ?? "/tmp/claude-adapter-test",
           config?.baseDir ?? "/tmp",
         ),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(ProjectRuntimeEnvironment, {
+          resolveForCwd:
+            config?.projectRuntimeEnvironment?.resolveForCwd ??
+            (() =>
+              Effect.succeed({
+                env: process.env,
+                mode: "ambient" as const,
+              })),
+        }),
       ),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(NodeServices.layer),
@@ -285,6 +309,83 @@ describe("ClaudeAdapterLive", () => {
       Effect.provide(harness.layer),
     );
   });
+
+  it.effect("passes a direnv-resolved environment into Claude query options", () => {
+    const harness = makeHarness({
+      projectRuntimeEnvironment: {
+        resolveForCwd: () =>
+          Effect.succeed({
+            env: {
+              PATH: "/direnv/bin",
+              IN_NIX_SHELL: "impure",
+            },
+            mode: "direnv",
+            rcPath: "/tmp/claude-adapter-test/.envrc",
+          }),
+      },
+    });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        cwd: "/tmp/claude-adapter-test",
+        runtimeMode: "approval-required",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.deepEqual(createInput?.options.env, {
+        PATH: "/direnv/bin",
+        IN_NIX_SHELL: "impure",
+      });
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect(
+    "emits a runtime warning when Claude falls back to the ambient project environment",
+    () => {
+      const harness = makeHarness({
+        projectRuntimeEnvironment: {
+          resolveForCwd: () =>
+            Effect.succeed({
+              env: {
+                PATH: "/ambient/bin",
+              },
+              mode: "ambient",
+              rcPath: "/tmp/claude-adapter-test/.envrc",
+              warning:
+                "direnv activation failed for /tmp/claude-adapter-test/.envrc; using ambient environment",
+            }),
+        },
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 4).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: "claudeAgent",
+          cwd: "/tmp/claude-adapter-test",
+          runtimeMode: "approval-required",
+        });
+
+        const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+        assert.deepEqual(
+          runtimeEvents.map((event) => event.type),
+          ["session.started", "runtime.warning", "session.configured", "session.state.changed"],
+        );
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
 
   it.effect("loads Claude filesystem settings sources for SDK sessions", () => {
     const harness = makeHarness();
@@ -1198,6 +1299,15 @@ describe("ClaudeAdapterLive", () => {
       },
     }).pipe(
       Layer.provideMerge(ServerConfig.layerTest("/tmp/claude-adapter-test", "/tmp")),
+      Layer.provideMerge(
+        Layer.succeed(ProjectRuntimeEnvironment, {
+          resolveForCwd: () =>
+            Effect.succeed({
+              env: process.env,
+              mode: "ambient" as const,
+            }),
+        }),
+      ),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(NodeServices.layer),
     );
