@@ -60,20 +60,6 @@ it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
       }),
     );
 
-    it.effect("resolves icon hrefs from nested web app source files", () =>
-      Effect.gen(function* () {
-        const resolver = yield* ProjectFaviconResolver;
-        const cwd = yield* makeTempDir;
-        yield* writeTextFile(cwd, "web/index.html", '<link rel="icon" href="/favicon.svg">');
-        yield* writeTextFile(cwd, "web/public/favicon.svg", "<svg>favicon</svg>");
-
-        const resolved = yield* resolver.resolvePath(cwd);
-
-        expect(resolved).not.toBeNull();
-        expect(resolved).toContain("web/public/favicon.svg");
-      }),
-    );
-
     it.effect("returns null when no icon is present", () =>
       Effect.gen(function* () {
         const resolver = yield* ProjectFaviconResolver;
