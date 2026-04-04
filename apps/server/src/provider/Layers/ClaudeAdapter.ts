@@ -77,6 +77,7 @@ import {
 } from "../Errors.ts";
 import { ClaudeAdapter, type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { ProjectRuntimeEnvironment } from "../../project/Services/ProjectRuntimeEnvironment.ts";
 
 const PROVIDER = "claudeAgent" as const;
 type ClaudeTextStreamKind = Extract<RuntimeContentStreamKind, "assistant_text" | "reasoning_text">;
@@ -985,6 +986,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const sessions = new Map<ThreadId, ClaudeSessionContext>();
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
   const serverSettingsService = yield* ServerSettingsService;
+  const projectRuntimeEnvironment = yield* ProjectRuntimeEnvironment;
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   const nextEventId = Effect.map(Random.nextUUIDv4, (id) => EventId.make(id));
@@ -2826,6 +2828,19 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       );
       const claudeBinaryPath = claudeSettings.binaryPath;
       const extraArgs = parseCliArgs(claudeSettings.launchArgs).flags;
+      const resolvedEnvironment = input.cwd
+        ? yield* projectRuntimeEnvironment.resolveForCwd(input.cwd)
+        : undefined;
+      if (resolvedEnvironment?.warning) {
+        yield* Effect.logWarning("claude session falling back to ambient project environment", {
+          threadId: input.threadId,
+          cwd: input.cwd,
+          rcPath: resolvedEnvironment.rcPath ?? null,
+          warning: resolvedEnvironment.warning,
+          autoAllowedWorktree: resolvedEnvironment.autoAllowedWorktree === true,
+          usedFallback: true,
+        });
+      }
       const modelSelection =
         input.modelSelection?.provider === "claudeAgent" ? input.modelSelection : undefined;
       const caps = getClaudeModelCapabilities(modelSelection?.model);
@@ -2863,7 +2878,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
-        env: process.env,
+        env: resolvedEnvironment?.env ?? process.env,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
       };
@@ -2934,6 +2949,14 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         payload: input.resumeCursor !== undefined ? { resume: input.resumeCursor } : {},
         providerRefs: {},
       });
+      if (resolvedEnvironment?.warning) {
+        yield* emitRuntimeWarning(context, resolvedEnvironment.warning, {
+          cwd: input.cwd,
+          rcPath: resolvedEnvironment.rcPath,
+          autoAllowedWorktree: resolvedEnvironment.autoAllowedWorktree === true,
+          usedFallback: true,
+        });
+      }
 
       const configuredStamp = yield* makeEventStamp();
       yield* offerRuntimeEvent({

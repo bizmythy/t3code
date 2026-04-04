@@ -507,6 +507,7 @@ describe("startSession", () => {
           assertSupportedCodexCliVersion: (input: {
             binaryPath: string;
             cwd: string;
+            env?: NodeJS.ProcessEnv;
             homePath?: string;
           }) => void;
         },
@@ -582,6 +583,7 @@ describe("startSession", () => {
           assertSupportedCodexCliVersion: (input: {
             binaryPath: string;
             cwd: string;
+            env?: NodeJS.ProcessEnv;
             homePath?: string;
           }) => void;
         },
@@ -615,6 +617,50 @@ describe("startSession", () => {
           sessions: Map<ThreadId, typeof existingContext>;
         }
       ).sessions.clear();
+      manager.stopAll();
+    }
+  });
+
+  it("passes a resolved project environment into the Codex version check", async () => {
+    const manager = new CodexAppServerManager();
+    const resolvedEnv = {
+      PATH: "/direnv/bin",
+      IN_NIX_SHELL: "impure",
+    };
+    const versionCheck = vi
+      .spyOn(
+        manager as unknown as {
+          assertSupportedCodexCliVersion: (input: {
+            binaryPath: string;
+            cwd: string;
+            env?: NodeJS.ProcessEnv;
+            homePath?: string;
+          }) => void;
+        },
+        "assertSupportedCodexCliVersion",
+      )
+      .mockImplementation(() => {
+        throw new Error("stop after version check");
+      });
+
+    try {
+      await expect(
+        manager.startSession({
+          threadId: asThreadId("thread-1"),
+          provider: "codex",
+          binaryPath: "codex",
+          cwd: "/tmp/project",
+          env: resolvedEnv,
+          runtimeMode: "full-access",
+        }),
+      ).rejects.toThrow("stop after version check");
+      expect(versionCheck).toHaveBeenCalledWith({
+        binaryPath: "codex",
+        cwd: "/tmp/project",
+        env: resolvedEnv,
+      });
+    } finally {
+      versionCheck.mockRestore();
       manager.stopAll();
     }
   });
