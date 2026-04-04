@@ -80,8 +80,12 @@ function stripMatchingOuterQuotes(value: string): string {
   return value;
 }
 
+function stripLeadingCommandPrefix(value: string): string {
+  return value.replace(/^command:\s*/i, "");
+}
+
 function normalizeCommandString(value: string): string {
-  const trimmed = value.trim();
+  const trimmed = stripLeadingCommandPrefix(value.trim());
   if (trimmed.length === 0) {
     return trimmed;
   }
