@@ -463,6 +463,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
+      ...(settings.composerVimModeEnabled !== DEFAULT_UNIFIED_SETTINGS.composerVimModeEnabled
+        ? ["Vim mode"]
+        : []),
       ...(settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
         ? ["Diff line wrapping"]
         : []),
@@ -486,6 +489,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       isGitWritingModelDirty,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
+      settings.composerVimModeEnabled,
       settings.defaultThreadEnvMode,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
@@ -851,6 +855,32 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
               </SelectPopup>
             </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Vim mode"
+          description="Use a vim-enabled monospace composer powered by CodeMirror."
+          resetAction={
+            settings.composerVimModeEnabled !== DEFAULT_UNIFIED_SETTINGS.composerVimModeEnabled ? (
+              <SettingResetButton
+                label="vim mode"
+                onClick={() =>
+                  updateSettings({
+                    composerVimModeEnabled: DEFAULT_UNIFIED_SETTINGS.composerVimModeEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.composerVimModeEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ composerVimModeEnabled: Boolean(checked) })
+              }
+              aria-label="Enable vim mode in the composer"
+            />
           }
         />
 
