@@ -11,6 +11,7 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 
+import { normalizeToolCommandValue } from "./lib/toolCommand";
 import type {
   ChatMessage,
   ProposedPlan,
@@ -636,30 +637,16 @@ function asTrimmedString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function normalizeCommandValue(value: unknown): string | null {
-  const direct = asTrimmedString(value);
-  if (direct) {
-    return direct;
-  }
-  if (!Array.isArray(value)) {
-    return null;
-  }
-  const parts = value
-    .map((entry) => asTrimmedString(entry))
-    .filter((entry): entry is string => entry !== null);
-  return parts.length > 0 ? parts.join(" ") : null;
-}
-
 function extractToolCommand(payload: Record<string, unknown> | null): string | null {
   const data = asRecord(payload?.data);
   const item = asRecord(data?.item);
   const itemResult = asRecord(item?.result);
   const itemInput = asRecord(item?.input);
   const candidates = [
-    normalizeCommandValue(item?.command),
-    normalizeCommandValue(itemInput?.command),
-    normalizeCommandValue(itemResult?.command),
-    normalizeCommandValue(data?.command),
+    normalizeToolCommandValue(item?.command),
+    normalizeToolCommandValue(itemInput?.command),
+    normalizeToolCommandValue(itemResult?.command),
+    normalizeToolCommandValue(data?.command),
   ];
   return candidates.find((candidate) => candidate !== null) ?? null;
 }
