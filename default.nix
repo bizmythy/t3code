@@ -57,7 +57,7 @@ let
 
     outputHashMode = "recursive";
     outputHashAlgo = "sha256";
-    outputHash = "sha256-l2RYiMxoX/R0QUiljTdKJXm5v4JMJijMI536KYfxCbA=";
+    outputHash = "sha256-o/5YTM2gT4smo6IrSpWIWw2XfCf+h3ERMc7IAplXqRw=";
 
     nativeBuildInputs = [
       bun2nix.hook
